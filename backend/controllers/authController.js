@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const db = require('../config/database');
+const { User } = require('../models');
 const { generateToken, formatResponse } = require('../utils/helpers');
 const { ERROR_MESSAGES, SUCCESS_MESSAGES } = require('../utils/constants');
 
@@ -11,12 +11,11 @@ const register = async (req, res) => {
     const { email, password, username, full_name, phone, address } = req.body;
 
     // Check if user already exists
-    const existingUser = await db.query(
-      'SELECT id FROM users WHERE email = $1 OR username = $2',
-      [email, username]
-    );
+    const existingUser = await User.findOne({
+      $or: [{ email }, { username }]
+    });
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser) {
       return res.status(400).json(
         formatResponse(false, ERROR_MESSAGES.EMAIL_EXISTS)
       );
@@ -27,19 +26,26 @@ const register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
     // Create user
-    const result = await db.query(
-      `INSERT INTO users (email, password_hash, username, full_name, phone, address) 
-       VALUES ($1, $2, $3, $4, $5, $6) 
-       RETURNING id, email, username, full_name, created_at`,
-      [email, passwordHash, username, full_name, phone, address]
-    );
+    const user = await User.create({
+      email,
+      password_hash: passwordHash,
+      username,
+      full_name,
+      phone,
+      address
+    });
 
-    const user = result.rows[0];
-    const token = generateToken(user.id);
+    const token = generateToken(user._id);
 
     res.status(201).json(
       formatResponse(true, SUCCESS_MESSAGES.USER_CREATED, {
-        user,
+        user: {
+          id: user._id,
+          email: user.email,
+          username: user.username,
+          full_name: user.full_name,
+          created_at: user.createdAt
+        },
         token
       })
     );
@@ -59,18 +65,13 @@ const login = async (req, res) => {
     const { email, password } = req.body;
 
     // Find user by email
-    const result = await db.query(
-      'SELECT id, email, password_hash, username, full_name FROM users WHERE email = $1',
-      [email]
-    );
+    const user = await User.findOne({ email }).select('_id email password_hash username full_name');
 
-    if (result.rows.length === 0) {
+    if (!user) {
       return res.status(401).json(
         formatResponse(false, ERROR_MESSAGES.INVALID_CREDENTIALS)
       );
     }
-
-    const user = result.rows[0];
 
     // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
@@ -80,12 +81,12 @@ const login = async (req, res) => {
       );
     }
 
-    const token = generateToken(user.id);
+    const token = generateToken(user._id);
 
     res.status(200).json(
       formatResponse(true, SUCCESS_MESSAGES.LOGIN_SUCCESS, {
         user: {
-          id: user.id,
+          id: user._id,
           email: user.email,
           username: user.username,
           full_name: user.full_name

@@ -1,42 +1,57 @@
 
-const { Pool } = require('pg');
+const mongoose = require('mongoose');
 require('dotenv').config();
 
-const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
-  max: 20, // Maximum number of clients in the pool
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
-});
+// MongoDB connection options
+const options = {
+  maxPoolSize: 20, // Maximum number of connections in the pool
+  serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
+  socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
+  bufferMaxEntries: 0, // Disable mongoose buffering
+  bufferCommands: false, // Disable mongoose buffering
+};
 
-// Listen for pool errors
-pool.on('error', (err, client) => {
-  console.error('Unexpected error on idle client', err);
-  process.exit(-1);
-});
-
-// Test database connection on startup
-const testConnection = async () => {
+// Connect to MongoDB
+const connectDB = async () => {
   try {
-    const client = await pool.connect();
-    console.log('Database connected successfully');
-    client.release();
+    const conn = await mongoose.connect(process.env.MONGODB_URI, options);
+    console.log(`MongoDB connected successfully: ${conn.connection.host}`);
   } catch (err) {
-    console.error(' Database connection failed:', err.message);
-    console.error('Please check your database configuration in .env file');
+    console.error('MongoDB connection failed:', err.message);
+    console.error('Please check your MongoDB configuration in .env file');
     process.exit(1);
   }
 };
 
+// Handle connection events
+mongoose.connection.on('connected', () => {
+  console.log('Mongoose connected to MongoDB');
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('Mongoose connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('Mongoose disconnected from MongoDB');
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  try {
+    await mongoose.connection.close();
+    console.log('MongoDB connection closed through app termination');
+    process.exit(0);
+  } catch (err) {
+    console.error('Error during MongoDB disconnection:', err);
+    process.exit(1);
+  }
+});
+
 // Test connection when module is loaded
-testConnection();
+connectDB();
 
 module.exports = {
-  query: (text, params) => pool.query(text, params),
-  pool,
-  testConnection
+  mongoose,
+  connectDB
 };

@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const db = require('../config/database');
+const { User, Product, Category } = require('../models');
 const { formatResponse } = require('../utils/helpers');
 const { ERROR_MESSAGES, SUCCESS_MESSAGES } = require('../utils/constants');
 
@@ -8,13 +8,9 @@ const { ERROR_MESSAGES, SUCCESS_MESSAGES } = require('../utils/constants');
 // @access  Private
 const getProfile = async (req, res) => {
   try {
-    const result = await db.query(
-      `SELECT id, email, username, full_name, phone, address, profile_image, created_at 
-       FROM users WHERE id = $1`,
-      [req.user.id]
-    );
+    const user = await User.findById(req.user.id).select('-password_hash');
 
-    if (result.rows.length === 0) {
+    if (!user) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.USER_NOT_FOUND)
       );
@@ -22,7 +18,16 @@ const getProfile = async (req, res) => {
 
     res.status(200).json(
       formatResponse(true, 'Profile retrieved successfully', {
-        user: result.rows[0]
+        user: {
+          id: user._id,
+          email: user.email,
+          username: user.username,
+          full_name: user.full_name,
+          phone: user.phone,
+          address: user.address,
+          profile_image: user.profile_image,
+          created_at: user.createdAt
+        }
       })
     );
   } catch (error) {
@@ -43,33 +48,42 @@ const updateProfile = async (req, res) => {
 
     // Check if username is already taken by another user
     if (username) {
-      const existingUser = await db.query(
-        'SELECT id FROM users WHERE username = $1 AND id != $2',
-        [username, userId]
-      );
+      const existingUser = await User.findOne({
+        username,
+        _id: { $ne: userId }
+      });
 
-      if (existingUser.rows.length > 0) {
+      if (existingUser) {
         return res.status(400).json(
           formatResponse(false, ERROR_MESSAGES.USERNAME_EXISTS)
         );
       }
     }
 
-    const result = await db.query(
-      `UPDATE users 
-       SET username = COALESCE($1, username),
-           full_name = COALESCE($2, full_name),
-           phone = COALESCE($3, phone),
-           address = COALESCE($4, address),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5
-       RETURNING id, email, username, full_name, phone, address, profile_image, updated_at`,
-      [username, full_name, phone, address, userId]
-    );
+    const updateData = {};
+    if (username !== undefined) updateData.username = username;
+    if (full_name !== undefined) updateData.full_name = full_name;
+    if (phone !== undefined) updateData.phone = phone;
+    if (address !== undefined) updateData.address = address;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password_hash');
 
     res.status(200).json(
       formatResponse(true, 'Profile updated successfully', {
-        user: result.rows[0]
+        user: {
+          id: user._id,
+          email: user.email,
+          username: user.username,
+          full_name: user.full_name,
+          phone: user.phone,
+          address: user.address,
+          profile_image: user.profile_image,
+          updated_at: user.updatedAt
+        }
       })
     );
   } catch (error) {
@@ -89,19 +103,16 @@ const changePassword = async (req, res) => {
     const userId = req.user.id;
 
     // Get current password hash
-    const result = await db.query(
-      'SELECT password_hash FROM users WHERE id = $1',
-      [userId]
-    );
+    const user = await User.findById(userId).select('password_hash');
 
-    if (result.rows.length === 0) {
+    if (!user) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.USER_NOT_FOUND)
       );
     }
 
     // Verify current password
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
     if (!isCurrentPasswordValid) {
       return res.status(400).json(
         formatResponse(false, 'Current password is incorrect')
@@ -113,10 +124,7 @@ const changePassword = async (req, res) => {
     const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
 
     // Update password
-    await db.query(
-      'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-      [newPasswordHash, userId]
-    );
+    await User.findByIdAndUpdate(userId, { password_hash: newPasswordHash });
 
     res.status(200).json(
       formatResponse(true, 'Password changed successfully')
@@ -137,23 +145,22 @@ const getMyProducts = async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
 
-    const result = await db.query(
-      `SELECT p.*, c.name as category_name
-       FROM products p
-       JOIN categories c ON p.category_id = c.id
-       WHERE p.seller_id = $1
-       ORDER BY p.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [req.user.id, limit, offset]
-    );
+    const products = await Product.find({ seller_id: req.user.id })
+      .populate('category_id', 'name')
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(offset);
 
     res.status(200).json(
       formatResponse(true, 'Products retrieved successfully', {
-        products: result.rows,
+        products: products.map(product => ({
+          ...product.toObject(),
+          category_name: product.category_id?.name
+        })),
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          count: result.rows.length
+          count: products.length
         }
       })
     );

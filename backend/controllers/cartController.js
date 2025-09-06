@@ -1,4 +1,4 @@
-const db = require('../config/database');
+const { Cart, Product, Category, User } = require('../models');
 const { formatResponse } = require('../utils/helpers');
 const { ERROR_MESSAGES, SUCCESS_MESSAGES } = require('../utils/constants');
 
@@ -9,45 +9,49 @@ const getCart = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Get or create cart for user (with race condition protection)
-    let cartResult = await db.query('SELECT id FROM carts WHERE user_id = $1', [userId]);
+    // Get or create cart for user
+    let cart = await Cart.findOne({ user_id: userId });
     
-    if (cartResult.rows.length === 0) {
-      try {
-        cartResult = await db.query('INSERT INTO carts (user_id) VALUES ($1) RETURNING id', [userId]);
-      } catch (error) {
-        // If cart already exists due to race condition, fetch it
-        if (error.code === '23505') { // Unique constraint violation
-          cartResult = await db.query('SELECT id FROM carts WHERE user_id = $1', [userId]);
-        } else {
-          throw error;
-        }
-      }
+    if (!cart) {
+      cart = await Cart.create({ user_id: userId, items: [] });
     }
 
-    const cartId = cartResult.rows[0].id;
+    // Populate cart items with product details
+    const populatedCart = await Cart.findById(cart._id)
+      .populate({
+        path: 'items.product_id',
+        populate: [
+          { path: 'category_id', select: 'name' },
+          { path: 'seller_id', select: 'username' }
+        ]
+      });
 
-    // Get cart items with product details
-    const result = await db.query(
-      `SELECT ci.*, p.title, p.price, p.image_url, p.condition, p.is_available,
-              c.name as category_name, u.username as seller_name
-       FROM cart_items ci
-       JOIN products p ON ci.product_id = p.id
-       JOIN categories c ON p.category_id = c.id
-       JOIN users u ON p.seller_id = u.id
-       WHERE ci.cart_id = $1
-       ORDER BY ci.added_at DESC`,
-      [cartId]
-    );
+    // Transform the data to match the expected format
+    const items = populatedCart.items.map(item => {
+      const product = item.product_id;
+      return {
+        id: item._id,
+        product_id: product._id,
+        quantity: item.quantity,
+        added_at: item.added_at,
+        title: product.title,
+        price: product.price,
+        image_url: product.image_url,
+        condition: product.condition,
+        is_available: product.is_available,
+        category_name: product.category_id?.name,
+        seller_name: product.seller_id?.username
+      };
+    });
 
     // Calculate total
-    const total = result.rows.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
     res.status(200).json(
       formatResponse(true, 'Cart retrieved successfully', {
         cart: {
-          id: cartId,
-          items: result.rows,
+          id: cart._id,
+          items,
           total: total.toFixed(2)
         }
       })
@@ -69,61 +73,44 @@ const addToCart = async (req, res) => {
     const userId = req.user.id;
 
     // Check if product exists and is available
-    const productResult = await db.query(
-      'SELECT id, price, is_available FROM products WHERE id = $1',
-      [product_id]
-    );
+    const product = await Product.findById(product_id);
 
-    if (productResult.rows.length === 0) {
+    if (!product) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.PRODUCT_NOT_FOUND)
       );
     }
 
-    if (!productResult.rows[0].is_available) {
+    if (!product.is_available) {
       return res.status(400).json(
         formatResponse(false, 'Product is not available')
       );
     }
 
-    // Get or create cart for user (with race condition protection)
-    let cartResult = await db.query('SELECT id FROM carts WHERE user_id = $1', [userId]);
+    // Get or create cart for user
+    let cart = await Cart.findOne({ user_id: userId });
     
-    if (cartResult.rows.length === 0) {
-      try {
-        cartResult = await db.query('INSERT INTO carts (user_id) VALUES ($1) RETURNING id', [userId]);
-      } catch (error) {
-        // If cart already exists due to race condition, fetch it
-        if (error.code === '23505') { // Unique constraint violation
-          cartResult = await db.query('SELECT id FROM carts WHERE user_id = $1', [userId]);
-        } else {
-          throw error;
-        }
-      }
+    if (!cart) {
+      cart = await Cart.create({ user_id: userId, items: [] });
     }
-
-    const cartId = cartResult.rows[0].id;
 
     // Check if item already exists in cart
-    const existingItem = await db.query(
-      'SELECT id, quantity FROM cart_items WHERE cart_id = $1 AND product_id = $2',
-      [cartId, product_id]
+    const existingItemIndex = cart.items.findIndex(
+      item => item.product_id.toString() === product_id
     );
 
-    if (existingItem.rows.length > 0) {
+    if (existingItemIndex > -1) {
       // Update quantity
-      const newQuantity = existingItem.rows[0].quantity + quantity;
-      await db.query(
-        'UPDATE cart_items SET quantity = $1 WHERE id = $2',
-        [newQuantity, existingItem.rows[0].id]
-      );
+      cart.items[existingItemIndex].quantity += quantity;
     } else {
       // Add new item
-      await db.query(
-        'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES ($1, $2, $3)',
-        [cartId, product_id, quantity]
-      );
+      cart.items.push({
+        product_id,
+        quantity
+      });
     }
+
+    await cart.save();
 
     res.status(200).json(
       formatResponse(true, SUCCESS_MESSAGES.CART_ITEM_ADDED)
@@ -146,31 +133,29 @@ const updateCartItem = async (req, res) => {
     const userId = req.user.id;
 
     // Get cart for user
-    const cartResult = await db.query('SELECT id FROM carts WHERE user_id = $1', [userId]);
+    const cart = await Cart.findOne({ user_id: userId });
     
-    if (cartResult.rows.length === 0) {
+    if (!cart) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.CART_NOT_FOUND)
       );
     }
 
-    const cartId = cartResult.rows[0].id;
-
-    // Update cart item
-    const result = await db.query(
-      'UPDATE cart_items SET quantity = $1 WHERE id = $2 AND cart_id = $3 RETURNING *',
-      [quantity, id, cartId]
-    );
-
-    if (result.rows.length === 0) {
+    // Find and update cart item
+    const itemIndex = cart.items.findIndex(item => item._id.toString() === id);
+    
+    if (itemIndex === -1) {
       return res.status(404).json(
         formatResponse(false, 'Cart item not found')
       );
     }
 
+    cart.items[itemIndex].quantity = quantity;
+    await cart.save();
+
     res.status(200).json(
       formatResponse(true, 'Cart item updated successfully', {
-        item: result.rows[0]
+        item: cart.items[itemIndex]
       })
     );
   } catch (error) {
@@ -190,27 +175,25 @@ const removeFromCart = async (req, res) => {
     const userId = req.user.id;
 
     // Get cart for user
-    const cartResult = await db.query('SELECT id FROM carts WHERE user_id = $1', [userId]);
+    const cart = await Cart.findOne({ user_id: userId });
     
-    if (cartResult.rows.length === 0) {
+    if (!cart) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.CART_NOT_FOUND)
       );
     }
 
-    const cartId = cartResult.rows[0].id;
-
-    // Remove cart item
-    const result = await db.query(
-      'DELETE FROM cart_items WHERE id = $1 AND cart_id = $2 RETURNING *',
-      [id, cartId]
-    );
-
-    if (result.rows.length === 0) {
+    // Find and remove cart item
+    const itemIndex = cart.items.findIndex(item => item._id.toString() === id);
+    
+    if (itemIndex === -1) {
       return res.status(404).json(
         formatResponse(false, 'Cart item not found')
       );
     }
+
+    cart.items.splice(itemIndex, 1);
+    await cart.save();
 
     res.status(200).json(
       formatResponse(true, SUCCESS_MESSAGES.CART_ITEM_REMOVED)
@@ -231,18 +214,17 @@ const clearCart = async (req, res) => {
     const userId = req.user.id;
 
     // Get cart for user
-    const cartResult = await db.query('SELECT id FROM carts WHERE user_id = $1', [userId]);
+    const cart = await Cart.findOne({ user_id: userId });
     
-    if (cartResult.rows.length === 0) {
+    if (!cart) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.CART_NOT_FOUND)
       );
     }
 
-    const cartId = cartResult.rows[0].id;
-
     // Clear all cart items
-    await db.query('DELETE FROM cart_items WHERE cart_id = $1', [cartId]);
+    cart.items = [];
+    await cart.save();
 
     res.status(200).json(
       formatResponse(true, SUCCESS_MESSAGES.CART_CLEARED)

@@ -32,22 +32,19 @@ const Menucart = () => {
       >
        <div className="p-4 pt-16 w-48"> {/* optional width control */}
           <nav className="space-y-2">
-      <a href="#" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
+      <a href="/profile" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
         Profile
       </a>
-      <a href="#" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
+      <a href="/listing" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
         My Listing
       </a>
-      <a href="#" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
-        My Products
-      </a>
-      <a href="#" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
+      <a href="/previous-purchase" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
         My Purchases
       </a>
       <a href="#" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
         Contact Us
       </a>
-      <a href="#" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
+      <a href="/about" className="block px-4 py-3 text-gray-800 hover:bg-gray-100 rounded transition-colors duration-200">
         About
       </a>
           </nav>

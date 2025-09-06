@@ -1,45 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import logo from '../assets/logo.png';
 
 const AboutUs = () => {
     return (
         <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50">
-            {/* Hero Section */}
-            <div className="relative bg-gradient-to-r from-green-600 to-emerald-700 text-white py-20 px-4 overflow-hidden">
-                <div className="absolute inset-0 bg-black opacity-10"></div>
-                <div className="relative max-w-6xl mx-auto text-center">
-                    <motion.div 
-                        initial={{ opacity: 0, y: 30 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.8 }}
-                        className="flex justify-center mb-8"
-                    >
-                        <img 
-                            src={logo} 
-                            alt="EcoFinds Logo" 
-                            className="w-20 h-20 object-contain"
-                        />
-                    </motion.div>
-                    <motion.h1 
-                        initial={{ opacity: 0, y: 30 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.8, delay: 0.2 }}
-                        className="text-5xl font-bold mb-4"
-                    >
-                        About EcoFinds
-                    </motion.h1>
-                    <motion.p 
-                        initial={{ opacity: 0, y: 30 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.8, delay: 0.4 }}
-                        className="text-xl opacity-90 max-w-2xl mx-auto"
-                    >
-                        Creating a sustainable future, one transaction at a time
-                    </motion.p>
-                </div>
-            </div>
-
             {/* Our Story Section */}
             <section className="py-20 px-4">
                 <div className="max-w-6xl mx-auto">
@@ -50,7 +14,7 @@ const AboutUs = () => {
                         viewport={{ once: true }}
                         className="text-center mb-16"
                     >
-                        <h2 className="text-4xl font-bold text-gray-800 mb-8">Our Story</h2>
+                        <h2 className="text-4xl font-bold text-gray-800 mb-6">Our Story</h2>
                         <div className="max-w-4xl mx-auto space-y-6 text-lg text-gray-600 leading-relaxed">
                             <p>
                                 **EcoFinds was born from a simple yet powerful idea: every item has more than one life to live.** In a world where fast consumption threatens our planet's future, we're creating a vibrant marketplace that makes sustainable choices not just possible, but exciting and rewarding.
@@ -64,7 +28,7 @@ const AboutUs = () => {
             </section>
 
             {/* Vision & Mission Section */}
-            <section className="py-20 px-4 bg-gray-50">
+            <section className="py-20 px-4">
                 <div className="max-w-6xl mx-auto">
                     <div className="grid md:grid-cols-2 gap-12">
                         {/* Vision */}
@@ -210,7 +174,7 @@ const AboutUs = () => {
             </section>
 
             {/* Our Values Section */}
-            <section className="py-20 px-4 bg-gradient-to-br from-gray-50 to-green-50">
+            <section className="py-20 px-4">
                 <div className="max-w-6xl mx-auto">
                     <motion.div 
                         initial={{ opacity: 0, y: 30 }}
@@ -306,25 +270,36 @@ const AboutUs = () => {
             </section>
 
             {/* Call to Action Section */}
-            <section className="py-20 px-4 bg-gradient-to-r from-green-600 to-emerald-700 text-white">
-                <div className="max-w-4xl mx-auto text-center">
-                    <motion.div 
+            <section className="py-20 px-4">
+                <div className="max-w-4xl mx-auto">
+                    <motion.div
                         initial={{ opacity: 0, y: 30 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.8 }}
                         viewport={{ once: true }}
+                        className="bg-white rounded-2xl shadow-xl p-12 text-center"
                     >
-                        <h2 className="text-4xl font-bold mb-6">Join the EcoFinds Community</h2>
-                        <p className="text-xl mb-8 opacity-90">
-                            Ready to make a positive impact on the planet while discovering unique treasures? Start your sustainable shopping journey today.
+                        <h2 className="text-4xl font-bold mb-6 text-gray-800">
+                            Join the EcoFinds Community
+                        </h2>
+                        <p className="text-xl text-gray-600 mb-12 max-w-2xl mx-auto leading-relaxed">
+                            Ready to make a positive impact on the planet while discovering unique treasures? Start your sustainable shopping journey today and become part of a community that cares.
                         </p>
-                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                            <button className="bg-white text-green-600 px-8 py-4 rounded-2xl font-bold text-lg hover:bg-gray-100 transform hover:scale-105 transition-all duration-300 shadow-lg">
+                        <div className="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+                            <motion.button 
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.98 }}
+                                className="bg-green-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:bg-green-700 transition-all duration-300 shadow-lg hover:shadow-xl"
+                            >
                                 Start Shopping
-                            </button>
-                            <button className="border-2 border-white text-white px-8 py-4 rounded-2xl font-bold text-lg hover:bg-white hover:text-green-600 transform hover:scale-105 transition-all duration-300">
+                            </motion.button>
+                            <motion.button 
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.98 }}
+                                className="border-2 border-green-600 text-green-600 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-green-600 hover:text-white transition-all duration-300 shadow-lg hover:shadow-xl"
+                            >
                                 Become a Seller
-                            </button>
+                            </motion.button>
                         </div>
                     </motion.div>
                 </div>

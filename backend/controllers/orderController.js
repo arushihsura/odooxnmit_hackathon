@@ -1,4 +1,4 @@
-const db = require('../config/database');
+const { Order, Cart, Product, User } = require('../models');
 const { formatResponse } = require('../utils/helpers');
 const { ERROR_MESSAGES, SUCCESS_MESSAGES, ORDER_STATUS } = require('../utils/constants');
 
@@ -10,33 +10,22 @@ const createOrder = async (req, res) => {
     const userId = req.user.id;
 
     // Get user's cart
-    const cartResult = await db.query('SELECT id FROM carts WHERE user_id = $1', [userId]);
+    const cart = await Cart.findOne({ user_id: userId }).populate('items.product_id');
     
-    if (cartResult.rows.length === 0) {
+    if (!cart) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.CART_NOT_FOUND)
       );
     }
 
-    const cartId = cartResult.rows[0].id;
-
-    // Get cart items with product details
-    const cartItemsResult = await db.query(
-      `SELECT ci.*, p.title, p.price, p.is_available
-       FROM cart_items ci
-       JOIN products p ON ci.product_id = p.id
-       WHERE ci.cart_id = $1`,
-      [cartId]
-    );
-
-    if (cartItemsResult.rows.length === 0) {
+    if (cart.items.length === 0) {
       return res.status(400).json(
         formatResponse(false, 'Cart is empty')
       );
     }
 
     // Check if all products are still available
-    const unavailableItems = cartItemsResult.rows.filter(item => !item.is_available);
+    const unavailableItems = cart.items.filter(item => !item.product_id.is_available);
     if (unavailableItems.length > 0) {
       return res.status(400).json(
         formatResponse(false, 'Some items in your cart are no longer available')
@@ -44,43 +33,46 @@ const createOrder = async (req, res) => {
     }
 
     // Calculate total amount
-    const totalAmount = cartItemsResult.rows.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const totalAmount = cart.items.reduce((sum, item) => sum + (item.product_id.price * item.quantity), 0);
 
     // Start transaction
-    await db.query('BEGIN');
+    const session = await Order.startSession();
+    session.startTransaction();
 
     try {
-      // Create order
-      const orderResult = await db.query(
-        'INSERT INTO orders (user_id, total_amount, status) VALUES ($1, $2, $3) RETURNING *',
-        [userId, totalAmount, ORDER_STATUS.PENDING]
-      );
-
-      const order = orderResult.rows[0];
-
       // Create order items
-      for (const item of cartItemsResult.rows) {
-        await db.query(
-          'INSERT INTO order_items (order_id, product_id, quantity, price_at_purchase) VALUES ($1, $2, $3, $4)',
-          [order.id, item.product_id, item.quantity, item.price]
-        );
-      }
+      const orderItems = cart.items.map(item => ({
+        product_id: item.product_id._id,
+        quantity: item.quantity,
+        price_at_purchase: item.product_id.price
+      }));
+
+      // Create order
+      const order = await Order.create([{
+        user_id: userId,
+        total_amount: totalAmount,
+        status: ORDER_STATUS.PENDING,
+        items: orderItems
+      }], { session });
 
       // Clear cart
-      await db.query('DELETE FROM cart_items WHERE cart_id = $1', [cartId]);
+      cart.items = [];
+      await cart.save({ session });
 
       // Commit transaction
-      await db.query('COMMIT');
+      await session.commitTransaction();
 
       res.status(201).json(
         formatResponse(true, SUCCESS_MESSAGES.ORDER_CREATED, {
-          order
+          order: order[0]
         })
       );
     } catch (error) {
       // Rollback transaction
-      await db.query('ROLLBACK');
+      await session.abortTransaction();
       throw error;
+    } finally {
+      session.endSession();
     }
   } catch (error) {
     console.error('Create order error:', error);
@@ -99,25 +91,35 @@ const getOrders = async (req, res) => {
     const offset = (page - 1) * limit;
     const userId = req.user.id;
 
-    const result = await db.query(
-      `SELECT o.*, 
-              COUNT(oi.id) as item_count
-       FROM orders o
-       LEFT JOIN order_items oi ON o.id = oi.order_id
-       WHERE o.user_id = $1
-       GROUP BY o.id
-       ORDER BY o.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
+    const orders = await Order.find({ user_id: userId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(offset)
+      .select('_id total_amount status createdAt updatedAt')
+      .lean();
+
+    // Add item count to each order
+    const ordersWithItemCount = await Promise.all(
+      orders.map(async (order) => {
+        const itemCount = await Order.aggregate([
+          { $match: { _id: order._id } },
+          { $unwind: '$items' },
+          { $count: 'item_count' }
+        ]);
+        return {
+          ...order,
+          item_count: itemCount.length > 0 ? itemCount[0].item_count : 0
+        };
+      })
     );
 
     res.status(200).json(
       formatResponse(true, 'Orders retrieved successfully', {
-        orders: result.rows,
+        orders: ordersWithItemCount,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          count: result.rows.length
+          count: ordersWithItemCount.length
         }
       })
     );
@@ -137,33 +139,35 @@ const getOrder = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    // Get order
-    const orderResult = await db.query(
-      'SELECT * FROM orders WHERE id = $1 AND user_id = $2',
-      [id, userId]
-    );
+    // Get order with populated items
+    const order = await Order.findOne({ _id: id, user_id: userId })
+      .populate({
+        path: 'items.product_id',
+        populate: {
+          path: 'seller_id',
+          select: 'username'
+        }
+      });
 
-    if (orderResult.rows.length === 0) {
+    if (!order) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.ORDER_NOT_FOUND)
       );
     }
 
-    // Get order items
-    const itemsResult = await db.query(
-      `SELECT oi.*, p.title, p.image_url, u.username as seller_name
-       FROM order_items oi
-       JOIN products p ON oi.product_id = p.id
-       JOIN users u ON p.seller_id = u.id
-       WHERE oi.order_id = $1`,
-      [id]
-    );
+    // Transform items to match expected format
+    const items = order.items.map(item => ({
+      ...item.toObject(),
+      title: item.product_id.title,
+      image_url: item.product_id.image_url,
+      seller_name: item.product_id.seller_id?.username
+    }));
 
     res.status(200).json(
       formatResponse(true, 'Order retrieved successfully', {
         order: {
-          ...orderResult.rows[0],
-          items: itemsResult.rows
+          ...order.toObject(),
+          items
         }
       })
     );
@@ -185,29 +189,38 @@ const updateOrderStatus = async (req, res) => {
     const userId = req.user.id;
 
     // Check if order exists and user is the seller of any item
-    const orderResult = await db.query(
-      `SELECT o.* FROM orders o
-       JOIN order_items oi ON o.id = oi.order_id
-       JOIN products p ON oi.product_id = p.id
-       WHERE o.id = $1 AND p.seller_id = $2`,
-      [id, userId]
-    );
+    const order = await Order.findOne({
+      _id: id,
+      'items.product_id': { $exists: true }
+    }).populate('items.product_id');
 
-    if (orderResult.rows.length === 0) {
+    if (!order) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.ORDER_NOT_FOUND)
       );
     }
 
+    // Check if user is seller of any item in the order
+    const isSeller = order.items.some(item => 
+      item.product_id.seller_id.toString() === userId
+    );
+
+    if (!isSeller) {
+      return res.status(403).json(
+        formatResponse(false, 'You are not authorized to update this order')
+      );
+    }
+
     // Update order status
-    const result = await db.query(
-      'UPDATE orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
-      [status, id]
+    const updatedOrder = await Order.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true, runValidators: true }
     );
 
     res.status(200).json(
       formatResponse(true, SUCCESS_MESSAGES.ORDER_UPDATED, {
-        order: result.rows[0]
+        order: updatedOrder
       })
     );
   } catch (error) {

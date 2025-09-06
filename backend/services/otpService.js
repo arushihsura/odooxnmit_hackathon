@@ -1,4 +1,4 @@
-const db = require('../config/database');
+const { User, UserOTP } = require('../models');
 const { formatResponse } = require('../utils/helpers');
 const { ERROR_MESSAGES } = require('../utils/constants');
 
@@ -12,12 +12,9 @@ const otpService = {
   async sendPasswordResetOTP(email) {
     try {
       // Check if user exists
-      const userResult = await db.query(
-        'SELECT id, email FROM users WHERE email = $1',
-        [email]
-      );
+      const user = await User.findOne({ email }).select('_id email');
 
-      if (userResult.rows.length === 0) {
+      if (!user) {
         return { success: false, message: 'User not found with this email' };
       }
 
@@ -51,24 +48,19 @@ const otpService = {
   // Verify password reset OTP
   async verifyPasswordResetOTP(email, otp) {
     try {
-      const result = await db.query(
-        `SELECT * FROM user_otps 
-         WHERE email = $1 
-         AND otp = $2 
-         AND expires_at > NOW() 
-         AND is_used = FALSE`,
-        [email, otp]
-      );
+      const otpRecord = await UserOTP.findOne({
+        email,
+        otp,
+        expires_at: { $gt: new Date() },
+        is_used: false
+      });
 
-      if (result.rows.length === 0) {
+      if (!otpRecord) {
         return { success: false, message: 'Invalid or expired OTP' };
       }
 
       // Mark OTP as used
-      await db.query(
-        'UPDATE user_otps SET is_used = TRUE WHERE email = $1 AND otp = $2',
-        [email, otp]
-      );
+      await UserOTP.findByIdAndUpdate(otpRecord._id, { is_used: true });
 
       return { success: true, message: 'OTP verified successfully' };
     } catch (error) {
@@ -92,12 +84,13 @@ const otpService = {
       const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
       // Update password
-      const result = await db.query(
-        'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE email = $2 RETURNING id',
-        [hashedPassword, email]
+      const user = await User.findOneAndUpdate(
+        { email },
+        { password_hash: hashedPassword },
+        { new: true }
       );
 
-      if (result.rows.length === 0) {
+      if (!user) {
         return { success: false, message: 'User not found' };
       }
 
@@ -112,20 +105,16 @@ const otpService = {
   async createOrUpdate(email, otp) {
     try {
       // First, mark any existing OTPs as used
-      await db.query(
-        'UPDATE user_otps SET is_used = TRUE WHERE email = $1',
-        [email]
-      );
+      await UserOTP.updateMany({ email }, { is_used: true });
 
       // Insert new OTP
-      const result = await db.query(
-        `INSERT INTO user_otps (email, otp, expires_at) 
-         VALUES ($1, $2, NOW() + INTERVAL '10 minutes') 
-         RETURNING *`,
-        [email, otp]
-      );
+      const otpRecord = await UserOTP.create({
+        email,
+        otp,
+        expires_at: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes from now
+      });
 
-      return result.rows[0];
+      return otpRecord;
     } catch (error) {
       console.error('Error creating OTP:', error);
       throw error;
@@ -135,12 +124,12 @@ const otpService = {
   // Clean expired OTPs (cleanup function)
   async cleanExpiredOTPs() {
     try {
-      const result = await db.query(
-        'DELETE FROM user_otps WHERE expires_at < NOW()'
-      );
+      const result = await UserOTP.deleteMany({
+        expires_at: { $lt: new Date() }
+      });
       
-      console.log(`Cleaned up ${result.rowCount} expired OTPs`);
-      return result.rowCount;
+      console.log(`Cleaned up ${result.deletedCount} expired OTPs`);
+      return result.deletedCount;
     } catch (error) {
       console.error('Error cleaning expired OTPs:', error);
       throw error;
@@ -150,14 +139,12 @@ const otpService = {
   // Check if user can request new OTP (rate limiting)
   async canRequestOTP(email) {
     try {
-      const result = await db.query(
-        `SELECT COUNT(*) as count FROM user_otps 
-         WHERE email = $1 
-         AND created_at > NOW() - INTERVAL '1 minute'`,
-        [email]
-      );
+      const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+      const count = await UserOTP.countDocuments({
+        email,
+        createdAt: { $gt: oneMinuteAgo }
+      });
 
-      const count = parseInt(result.rows[0].count);
       return count < 3; // Allow max 3 OTP requests per minute
     } catch (error) {
       console.error('Error checking OTP rate limit:', error);

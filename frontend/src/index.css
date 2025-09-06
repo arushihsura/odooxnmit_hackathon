@@ -15,24 +15,18 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
 
 body {
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center; /* centers horizontally */
-  align-items: center;     /* centers vertically */
   min-width: 320px;
   min-height: 100vh;
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  background-color: #f9fafc;
+  color: rgba(255, 255, 255, 0.87);
 }
+
 
 h1 {
   font-size: 3.2em;
@@ -63,3 +57,15 @@ button:focus-visible {
 }
 
 
+/* Ensure all input fields have black text */
+input,
+textarea,
+select {
+  color: black !important;
+}
+
+/* Optional: make placeholder text gray */
+input::placeholder,
+textarea::placeholder {
+  color: #6b7280; /* Tailwind gray-500 */
+}

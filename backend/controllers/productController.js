@@ -1,4 +1,4 @@
-const db = require('../config/database');
+const { Product, Category, User } = require('../models');
 const { formatResponse } = require('../utils/helpers');
 const { ERROR_MESSAGES, SUCCESS_MESSAGES } = require('../utils/constants');
 
@@ -14,64 +14,69 @@ const getProducts = async (req, res) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20)); // Max 100 items per page
     const offset = (pageNum - 1) * limitNum;
 
-    // Build base query for counting
-    let countQuery = `
-      SELECT COUNT(*) as total
-      FROM products p
-      JOIN categories c ON p.category_id = c.id
-      JOIN users u ON p.seller_id = u.id
-      WHERE p.is_available = true
-    `;
-    let queryParams = [];
-    let paramCount = 0;
-
+    // Build query filter
+    const filter = { is_available: true };
+    
     if (category && !isNaN(category)) {
-      paramCount++;
-      countQuery += ` AND p.category_id = $${paramCount}`;
-      queryParams.push(category);
+      filter.category_id = category;
     }
 
     if (search) {
-      paramCount++;
-      // Sanitize search input - remove special characters that could cause issues
-      const sanitizedSearch = search.replace(/[%_\\]/g, '\\$&');
-      countQuery += ` AND (p.title ILIKE $${paramCount} OR p.description ILIKE $${paramCount})`;
-      queryParams.push(`%${sanitizedSearch}%`);
+      // Use regex search instead of text search for better compatibility
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
     }
 
     // Get total count
-    const countResult = await db.query(countQuery, queryParams);
-    const totalCount = parseInt(countResult.rows[0].total);
+    const totalCount = await Product.countDocuments(filter);
 
-    // Build main query for data
-    let dataQuery = `
-      SELECT p.*, c.name as category_name, u.username as seller_name
-      FROM products p
-      JOIN categories c ON p.category_id = c.id
-      JOIN users u ON p.seller_id = u.id
-      WHERE p.is_available = true
-    `;
-    
-    // Add same filters to data query
-    if (category && !isNaN(category)) {
-      dataQuery += ` AND p.category_id = $${paramCount}`;
-    }
-    if (search) {
-      dataQuery += ` AND (p.title ILIKE $${paramCount} OR p.description ILIKE $${paramCount})`;
-    }
+    // Build aggregation pipeline
+    const pipeline = [
+      { $match: filter },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category_id',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'seller_id',
+          foreignField: '_id',
+          as: 'seller'
+        }
+      },
+      {
+        $addFields: {
+          category_name: { $arrayElemAt: ['$category.name', 0] },
+          seller_name: { $arrayElemAt: ['$seller.username', 0] }
+        }
+      },
+      { $sort: { createdAt: -1 } },
+      { $skip: offset },
+      { $limit: limitNum },
+      {
+        $project: {
+          category: 0,
+          seller: 0
+        }
+      }
+    ];
 
-    dataQuery += ` ORDER BY p.created_at DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
-    queryParams.push(limitNum, offset);
-
-    const result = await db.query(dataQuery, queryParams);
+    const products = await Product.aggregate(pipeline);
 
     res.status(200).json(
       formatResponse(true, 'Products retrieved successfully', {
-        products: result.rows,
+        products,
         pagination: {
           page: pageNum,
           limit: limitNum,
-          count: result.rows.length,
+          count: products.length,
           total: totalCount,
           totalPages: Math.ceil(totalCount / limitNum)
         }
@@ -92,24 +97,26 @@ const getProduct = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await db.query(
-      `SELECT p.*, c.name as category_name, u.username as seller_name, u.phone as seller_phone
-       FROM products p
-       JOIN categories c ON p.category_id = c.id
-       JOIN users u ON p.seller_id = u.id
-       WHERE p.id = $1`,
-      [id]
-    );
+    const product = await Product.findById(id)
+      .populate('category_id', 'name')
+      .populate('seller_id', 'username phone');
 
-    if (result.rows.length === 0) {
+    if (!product) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.PRODUCT_NOT_FOUND)
       );
     }
 
+    const productData = {
+      ...product.toObject(),
+      category_name: product.category_id?.name,
+      seller_name: product.seller_id?.username,
+      seller_phone: product.seller_id?.phone
+    };
+
     res.status(200).json(
       formatResponse(true, 'Product retrieved successfully', {
-        product: result.rows[0]
+        product: productData
       })
     );
   } catch (error) {
@@ -129,16 +136,19 @@ const createProduct = async (req, res) => {
     const seller_id = req.user.id;
     const image_url = req.file ? req.file.filename : 'placeholder.jpg';
 
-    const result = await db.query(
-      `INSERT INTO products (title, description, price, category_id, seller_id, image_url, condition)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [title, description, price, category_id, seller_id, image_url, condition]
-    );
+    const product = await Product.create({
+      title,
+      description,
+      price,
+      category_id,
+      seller_id,
+      image_url,
+      condition
+    });
 
     res.status(201).json(
       formatResponse(true, SUCCESS_MESSAGES.PRODUCT_CREATED, {
-        product: result.rows[0]
+        product
       })
     );
   } catch (error) {
@@ -159,34 +169,34 @@ const updateProduct = async (req, res) => {
     const seller_id = req.user.id;
 
     // Check if product exists and belongs to user
-    const existingProduct = await db.query(
-      'SELECT id FROM products WHERE id = $1 AND seller_id = $2',
-      [id, seller_id]
-    );
+    const existingProduct = await Product.findOne({
+      _id: id,
+      seller_id: seller_id
+    });
 
-    if (existingProduct.rows.length === 0) {
+    if (!existingProduct) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.PRODUCT_NOT_FOUND)
       );
     }
 
-    const result = await db.query(
-      `UPDATE products 
-       SET title = COALESCE($1, title),
-           description = COALESCE($2, description),
-           price = COALESCE($3, price),
-           category_id = COALESCE($4, category_id),
-           condition = COALESCE($5, condition),
-           is_available = COALESCE($6, is_available),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7 AND seller_id = $8
-       RETURNING *`,
-      [title, description, price, category_id, condition, is_available, id, seller_id]
+    const updateData = {};
+    if (title !== undefined) updateData.title = title;
+    if (description !== undefined) updateData.description = description;
+    if (price !== undefined) updateData.price = price;
+    if (category_id !== undefined) updateData.category_id = category_id;
+    if (condition !== undefined) updateData.condition = condition;
+    if (is_available !== undefined) updateData.is_available = is_available;
+
+    const product = await Product.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
     );
 
     res.status(200).json(
       formatResponse(true, SUCCESS_MESSAGES.PRODUCT_UPDATED, {
-        product: result.rows[0]
+        product
       })
     );
   } catch (error) {
@@ -206,18 +216,18 @@ const deleteProduct = async (req, res) => {
     const seller_id = req.user.id;
 
     // Check if product exists and belongs to user
-    const existingProduct = await db.query(
-      'SELECT id FROM products WHERE id = $1 AND seller_id = $2',
-      [id, seller_id]
-    );
+    const existingProduct = await Product.findOne({
+      _id: id,
+      seller_id: seller_id
+    });
 
-    if (existingProduct.rows.length === 0) {
+    if (!existingProduct) {
       return res.status(404).json(
         formatResponse(false, ERROR_MESSAGES.PRODUCT_NOT_FOUND)
       );
     }
 
-    await db.query('DELETE FROM products WHERE id = $1 AND seller_id = $2', [id, seller_id]);
+    await Product.findByIdAndDelete(id);
 
     res.status(200).json(
       formatResponse(true, SUCCESS_MESSAGES.PRODUCT_DELETED)
@@ -235,11 +245,11 @@ const deleteProduct = async (req, res) => {
 // @access  Public
 const getCategories = async (req, res) => {
   try {
-    const result = await db.query('SELECT * FROM categories ORDER BY name');
+    const categories = await Category.find().sort({ name: 1 });
 
     res.status(200).json(
       formatResponse(true, 'Categories retrieved successfully', {
-        categories: result.rows
+        categories
       })
     );
   } catch (error) {
