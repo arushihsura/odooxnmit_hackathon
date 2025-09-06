@@ -13,9 +13,14 @@ const Navbar = () => {
         </div>
 
         {/* Center: Logo */}
-        <div className="flex items-center justify-center flex-1 px-8">
-          <img src={logonew} alt="Odoo Hackathon Logo" className="w-28 h-auto max-h-12" />
-        </div>
+<div className="flex items-center justify-center flex-1 px-8">
+  <img
+    src={logonew}
+    alt="Odoo Hackathon Logo"
+    className="h-12 w-auto object-contain"
+  />
+</div>
+
 
         {/* Right: Cart + Profile */}
 <div className="flex items-center gap-3 flex-shrink-0 justify-end">

@@ -5,6 +5,7 @@ import Otp from './pages/Otp';
 import { Routes, Route } from "react-router-dom"
 import AboutUs from './pages/AboutUs';
 import 'react-toastify/dist/ReactToastify.css';
+import ProductDetailPage from './pages/ProductDetailPage';
 import './App.css';
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
         <Route path='/register' element={<Register />} />
         <Route path='/user/otp' element={<Otp />} />
         <Route path='/about' element={<AboutUs />} />
+        {/*<Route path="/product/:productId"  element={<ProductDetailPage productId={params.productId} />} />*/}
       </Routes>
     </>
   );
