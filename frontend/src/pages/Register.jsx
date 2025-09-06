@@ -9,10 +9,13 @@ const Register = () => {
     const [confirmPassShow, setConfirmPassShow] = useState(false);
     const [spiner, setSpiner] = useState(false);
     const [inputdata, setInputdata] = useState({
-        fname: "",
+        username: "",
+        full_name: "",
         email: "",
         password: "",
-        confirmPassword: ""
+        confirmPassword: "",
+        phone: "",
+        address: ""
     });
     const navigate = useNavigate();
 
@@ -25,10 +28,12 @@ const Register = () => {
     // register data
     const handleSubmit = async (e) => {
         e.preventDefault();
-        const { fname, email, password, confirmPassword } = inputdata;
+        const { username, full_name, email, password, confirmPassword, phone, address } = inputdata;
 
-        if (fname === "") {
-            toast.error("Enter Your Display Name")
+        if (username === "") {
+            toast.error("Enter Your Username")
+        } else if (full_name === "") {
+            toast.error("Enter Your Full Name")
         } else if (email === "") {
             toast.error("Enter Your Email")
         } else if (!email.includes("@")) {
@@ -43,14 +48,44 @@ const Register = () => {
             toast.error("Passwords do not match")
         } else {
             setSpiner(true);
-            const response = await registerfunction(inputdata);
+            
+            try {
+                // Prepare data for backend
+                const registerData = {
+                    username,
+                    full_name,
+                    email,
+                    password,
+                    phone: phone || "",
+                    address: address || ""
+                };
 
-            if (response.status === 200) {
-                setInputdata({ ...inputdata, fname: "", email: "", password: "", confirmPassword: "" });
-                setSpiner(false);
-                navigate("/")
-            } else {
-                toast.error(response.response.data.error);
+                const response = await registerfunction(registerData);
+
+                if (response.data && response.data.success) {
+                    // Store token and user data
+                    localStorage.setItem('token', response.data.data.token);
+                    localStorage.setItem('user', JSON.stringify(response.data.data.user));
+                    
+                    setInputdata({ 
+                        username: "", 
+                        full_name: "", 
+                        email: "", 
+                        password: "", 
+                        confirmPassword: "",
+                        phone: "",
+                        address: ""
+                    });
+                    setSpiner(false);
+                    toast.success("Registration successful!");
+                    navigate("/");
+                } else {
+                    toast.error(response.data?.message || "Registration failed!");
+                    setSpiner(false);
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                toast.error(error.response?.data?.message || "Registration failed!");
                 setSpiner(false);
             }
         }
@@ -81,18 +116,33 @@ const Register = () => {
 
                             {/* Registration Form */}
                             <form onSubmit={handleSubmit} className="space-y-4">
-                                {/* Display Name Field */}
+                                {/* Username Field */}
                                 <div className="space-y-1">
                                     <label className="block text-sm font-semibold text-gray-700">
-                                        Display Name:
+                                        Username:
                                     </label>
                                     <input
                                         type="text"
-                                        name="fname"
-                                        placeholder="Enter your display name"
-                                        value={inputdata.fname}
+                                        name="username"
+                                        placeholder="Enter your username"
+                                        value={inputdata.username}
                                         onChange={handleChange}
-                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
+                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
+                                    />
+                                </div>
+
+                                {/* Full Name Field */}
+                                <div className="space-y-1">
+                                    <label className="block text-sm font-semibold text-gray-700">
+                                        Full Name:
+                                    </label>
+                                    <input
+                                        type="text"
+                                        name="full_name"
+                                        placeholder="Enter your full name"
+                                        value={inputdata.full_name}
+                                        onChange={handleChange}
+                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
                                     />
                                 </div>
 
@@ -107,7 +157,37 @@ const Register = () => {
                                         placeholder="Enter your email address"
                                         value={inputdata.email}
                                         onChange={handleChange}
-                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
+                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
+                                    />
+                                </div>
+
+                                {/* Phone Field */}
+                                <div className="space-y-1">
+                                    <label className="block text-sm font-semibold text-gray-700">
+                                        Phone (Optional):
+                                    </label>
+                                    <input
+                                        type="tel"
+                                        name="phone"
+                                        placeholder="Enter your phone number"
+                                        value={inputdata.phone}
+                                        onChange={handleChange}
+                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
+                                    />
+                                </div>
+
+                                {/* Address Field */}
+                                <div className="space-y-1">
+                                    <label className="block text-sm font-semibold text-gray-700">
+                                        Address (Optional):
+                                    </label>
+                                    <textarea
+                                        name="address"
+                                        placeholder="Enter your address"
+                                        value={inputdata.address}
+                                        onChange={handleChange}
+                                        rows="2"
+                                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-gray-800 placeholder-gray-400 resize-none"
                                     />
                                 </div>
 
@@ -123,7 +203,7 @@ const Register = () => {
                                             placeholder="Create a strong password"
                                             value={inputdata.password}
                                             onChange={handleChange}
-                                            className="w-full px-3 py-2.5 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
+                                            className="w-full px-3 py-2.5 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
                                         />
                                         <button
                                             type="button"
@@ -157,7 +237,7 @@ const Register = () => {
                                             placeholder="Confirm your password"
                                             value={inputdata.confirmPassword}
                                             onChange={handleChange}
-                                            className="w-full px-3 py-2.5 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
+                                            className="w-full px-3 py-2.5 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
                                         />
                                         <button
                                             type="button"

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { NavLink, useNavigate } from "react-router-dom"
 import { ToastContainer, toast } from 'react-toastify';
-import { sentOtpFunction } from "../services/Apis";
+import { sentOtpFunction, loginFunction } from "../services/Apis";
 import logo from '../assets/logo.png';
 
 const Login = () => {
@@ -24,19 +24,31 @@ const Login = () => {
             toast.error("Enter Your Password!")
         } else {
             setSpiner(true);
-            // Add your password login API call here
-            // const response = await passwordLoginFunction({ email, password });
             
-            // Temporary simulation
-            setTimeout(() => {
-                toast.success("Login successful!");
+            try {
+                const response = await loginFunction({ email, password });
+                
+                if (response.data && response.data.success) {
+                    // Store token in localStorage
+                    localStorage.setItem('token', response.data.data.token);
+                    localStorage.setItem('user', JSON.stringify(response.data.data.user));
+                    
+                    toast.success("Login successful!");
+                    setSpiner(false);
+                    navigate("/");
+                } else {
+                    toast.error(response.data?.message || "Login failed!");
+                    setSpiner(false);
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                toast.error(error.response?.data?.message || "Login failed!");
                 setSpiner(false);
-                navigate("/landingpage");
-            }, 2000);
+            }
         }
     };
 
-    // OTP login
+    // OTP login (for password reset)
     const sendOtp = async (e) => {
         e.preventDefault();
 
@@ -48,13 +60,20 @@ const Login = () => {
             setSpiner(true);
             const data = { email: email };
 
-            const response = await sentOtpFunction(data);
+            try {
+                const response = await sentOtpFunction(data);
 
-            if (response.status === 200) {
-                setSpiner(false);
-                navigate("/user/otp", { state: email });
-            } else {
-                toast.error(response.response.data.error);
+                if (response.data && response.data.success) {
+                    setSpiner(false);
+                    toast.success("OTP sent to your email!");
+                    navigate("/user/otp", { state: email });
+                } else {
+                    toast.error(response.data?.message || "Failed to send OTP!");
+                    setSpiner(false);
+                }
+            } catch (error) {
+                console.error('OTP send error:', error);
+                toast.error(error.response?.data?.message || "Failed to send OTP!");
                 setSpiner(false);
             }
         }

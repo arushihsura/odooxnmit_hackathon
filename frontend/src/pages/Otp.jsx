@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { ToastContainer, toast } from 'react-toastify';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { userVerify } from "../services/Apis"
+import { verifyOtpFunction, resetPasswordFunction } from "../services/Apis"
 import Container from 'react-bootstrap/Container';
 import Row from 'react-bootstrap/Row';
 import Col from 'react-bootstrap/Col';
@@ -13,7 +13,10 @@ import Spinner from 'react-bootstrap/Spinner';
 const Otp = () => {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(300); // 5 minutes in seconds
+  const [timeLeft, setTimeLeft] = useState(600); // 10 minutes in seconds
+  const [step, setStep] = useState(1); // 1: verify OTP, 2: reset password
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const inputRefs = useRef([]);
 
   const location = useLocation();
@@ -72,7 +75,8 @@ const Otp = () => {
     }
   };
 
-  const LoginUser = async (e) => {
+  // Verify OTP
+  const verifyOTP = async (e) => {
     e.preventDefault();
     
     const otpString = otp.join("");
@@ -91,18 +95,55 @@ const Otp = () => {
       }
 
       try {
-        const response = await userVerify(data);
-        if (response.status === 200) {
-          localStorage.setItem("userdbtoken", response.data.userToken);
-          toast.success(response.data.message);
-          setTimeout(() => {
-            navigate("/dashboard")
-          }, 2000)
+        const response = await verifyOtpFunction(data);
+        if (response.data && response.data.success) {
+          toast.success("OTP verified successfully!");
+          setStep(2); // Move to password reset step
         } else {
-          toast.error(response.response.data.error)
+          toast.error(response.data?.message || "Invalid OTP");
         }
       } catch (error) {
-        toast.error("Something went wrong. Please try again.")
+        console.error('OTP verification error:', error);
+        toast.error(error.response?.data?.message || "Something went wrong. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    }
+  }
+
+  // Reset Password
+  const resetPassword = async (e) => {
+    e.preventDefault();
+    
+    if (newPassword === "") {
+      toast.error("Enter New Password");
+    } else if (newPassword.length < 6) {
+      toast.error("Password must be at least 6 characters");
+    } else if (confirmPassword === "") {
+      toast.error("Confirm Your Password");
+    } else if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match");
+    } else {
+      setLoading(true);
+      const data = {
+        email: location.state,
+        otp: otp.join(""),
+        newPassword: newPassword
+      }
+
+      try {
+        const response = await resetPasswordFunction(data);
+        if (response.data && response.data.success) {
+          toast.success("Password reset successfully!");
+          setTimeout(() => {
+            navigate("/login");
+          }, 2000);
+        } else {
+          toast.error(response.data?.message || "Password reset failed");
+        }
+      } catch (error) {
+        console.error('Password reset error:', error);
+        toast.error(error.response?.data?.message || "Password reset failed");
       } finally {
         setLoading(false);
       }
@@ -137,48 +178,83 @@ const Otp = () => {
 
                   {/* Form Header */}
                   <div className="form-header text-center mb-4">
-                    <h2 className="form-title">Enter OTP</h2>
+                    <h2 className="form-title">
+                      {step === 1 ? "Enter OTP" : "Reset Password"}
+                    </h2>
                     <p className="form-subtitle">
-                      We've sent a 6-digit verification code to<br />
-                      <strong>{location.state}</strong>
+                      {step === 1 ? (
+                        <>
+                          We've sent a 6-digit verification code to<br />
+                          <strong>{location.state}</strong>
+                        </>
+                      ) : (
+                        "Enter your new password"
+                      )}
                     </p>
                   </div>
 
                   {/* OTP Input */}
-                  <Form onSubmit={LoginUser}>
-                    <div className="otp-input-container mb-4">
-                      {otp.map((digit, index) => (
-                        <Form.Control
-                          key={index}
-                          ref={(el) => (inputRefs.current[index] = el)}
-                          type="text"
-                          value={digit}
-                          onChange={(e) => handleOtpChange(index, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(index, e)}
-                          onPaste={handlePaste}
-                          className="otp-input"
-                          maxLength="1"
-                          autoComplete="off"
-                        />
-                      ))}
-                    </div>
-
-                    {/* Timer */}
-                    <div className="timer-container text-center mb-4">
-                      <div className="timer-display">
-                        <span className="timer-icon">⏰</span>
-                        <span className="timer-text">
-                          {timeLeft > 0 ? formatTime(timeLeft) : "Time expired"}
-                        </span>
+                  <Form onSubmit={step === 1 ? verifyOTP : resetPassword}>
+                    {step === 1 ? (
+                      <div className="otp-input-container mb-4">
+                        {otp.map((digit, index) => (
+                          <Form.Control
+                            key={index}
+                            ref={(el) => (inputRefs.current[index] = el)}
+                            type="text"
+                            value={digit}
+                            onChange={(e) => handleOtpChange(index, e.target.value)}
+                            onKeyDown={(e) => handleKeyDown(index, e)}
+                            onPaste={handlePaste}
+                            className="otp-input"
+                            maxLength="1"
+                            autoComplete="off"
+                          />
+                        ))}
                       </div>
-                    </div>
+                    ) : (
+                      <div className="password-fields mb-4">
+                        <Form.Group className="mb-3">
+                          <Form.Label>New Password</Form.Label>
+                          <Form.Control
+                            type="password"
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            placeholder="Enter new password"
+                            className="password-input"
+                          />
+                        </Form.Group>
+                        <Form.Group className="mb-3">
+                          <Form.Label>Confirm Password</Form.Label>
+                          <Form.Control
+                            type="password"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            placeholder="Confirm new password"
+                            className="password-input"
+                          />
+                        </Form.Group>
+                      </div>
+                    )}
+
+                    {/* Timer - Only show for OTP step */}
+                    {step === 1 && (
+                      <div className="timer-container text-center mb-4">
+                        <div className="timer-display">
+                          <span className="timer-icon">⏰</span>
+                          <span className="timer-text">
+                            {timeLeft > 0 ? formatTime(timeLeft) : "Time expired"}
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Submit Button */}
                     <Button
                       type="submit"
                       className="verify-button w-100 mb-4"
                       size="lg"
-                      disabled={loading || otp.join("").length < 6}
+                      disabled={loading || (step === 1 && otp.join("").length < 6) || (step === 2 && (!newPassword || !confirmPassword))}
                     >
                       {loading ? (
                         <>
@@ -188,28 +264,30 @@ const Otp = () => {
                             size="sm"
                             className="me-2"
                           />
-                          Verifying...
+                          {step === 1 ? "Verifying..." : "Resetting..."}
                         </>
                       ) : (
                         <>
                           <span className="me-2">✓</span>
-                          Verify OTP
+                          {step === 1 ? "Verify OTP" : "Reset Password"}
                         </>
                       )}
                     </Button>
 
-                    {/* Resend Section */}
-                    <div className="resend-section text-center">
-                      <p className="mb-2">Didn't receive the code?</p>
-                      <Button
-                        variant="link"
-                        className="resend-button"
-                        onClick={resendOTP}
-                        disabled={timeLeft > 0}
-                      >
-                        {timeLeft > 0 ? `Resend in ${formatTime(timeLeft)}` : 'Resend OTP'}
-                      </Button>
-                    </div>
+                    {/* Resend Section - Only show for OTP step */}
+                    {step === 1 && (
+                      <div className="resend-section text-center">
+                        <p className="mb-2">Didn't receive the code?</p>
+                        <Button
+                          variant="link"
+                          className="resend-button"
+                          onClick={resendOTP}
+                          disabled={timeLeft > 0}
+                        >
+                          {timeLeft > 0 ? `Resend in ${formatTime(timeLeft)}` : 'Resend OTP'}
+                        </Button>
+                      </div>
+                    )}
                   </Form>
                 </Card.Body>
               </Card>
@@ -310,6 +388,26 @@ const Otp = () => {
         }
 
         .otp-input:focus {
+          border-color: #007bff;
+          box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+          outline: none;
+        }
+
+        .password-fields {
+          max-width: 400px;
+          margin: 0 auto;
+        }
+
+        .password-input {
+          border: 2px solid #e1e5e9;
+          border-radius: 12px;
+          padding: 12px 16px;
+          font-size: 1rem;
+          transition: all 0.3s ease;
+          background: white;
+        }
+
+        .password-input:focus {
           border-color: #007bff;
           box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
           outline: none;
